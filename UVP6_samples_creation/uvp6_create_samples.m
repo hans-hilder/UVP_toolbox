@@ -157,7 +157,7 @@ try
     cruise = tline(7:end);
     fclose(fid);
 catch
-    cruise = 'unkown';
+    cruise = 'unknown';
 end
 
 
