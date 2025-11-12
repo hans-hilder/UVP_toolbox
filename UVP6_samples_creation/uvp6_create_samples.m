@@ -2,6 +2,8 @@
 % Create the sample file for all sequences
 % For SeaExplorer, for SeaGlider and for BGC-argo float
 %
+% 20250929 In Progress, updates to allow for ALR (Auto-sub) data. 
+%
 % !!! WARNINGS !!!
 % !!! the code is case sensitive !!!
 % !!! Close UVPapp before using the code !!!
@@ -91,7 +93,7 @@ disp('')
 %parking_pressure_diff : pressure difference to identify parkings
 parking_pressure_diff = 70; % with margins
 %deep_black_limit : depth where the black is considered only from the instrument
-deep_black_limit = 60; %80m to be sure
+deep_black_limit = 100; %80m to be sure
 
 
 % select the project
@@ -111,15 +113,20 @@ elseif contains(project_folder, 'SG')
 elseif contains(project_folder, 'WMO')
     disp('BGC float project')
     vector_type = 'float';
+elseif ~isempty(dir(fullfile(project_folder, 'doc', 'alr_meta_sn*')))
+    disp('ALR project')
+    vector_type = 'ALR';
 else
-    warning('Only seaexplorer, seaglider and float project are supported')
-    vector_type = input('Is it a SeaExplorer (se), a SeaGlider (sg) or a float (fl) project ? ([se]/sg/fl) ','s');
+    warning('Only seaexplorer, seaglider, float, and ALR project are supported')
+    vector_type = input('Is it a SeaExplorer (se), a SeaGlider (sg), a float (fl) project, or and ALR (alr) project ? ([se]/sg/fl/alr) ','s');
     if isempty(vector_type) || strcmp(vector_type,'se')
         vector_type = 'SeaExplorer';
     elseif strcmp(vector_type, 'sg')
         vector_type = 'SeaGlider';
     elseif strcmp(vector_type, 'fl')
         vector_type = 'float';
+    elseif strcmp(vector_type, 'alr')
+        vector_type = 'ALR';
     else
         error('ERROR : the project is not a seaexplorer or seaglider project')
     end
@@ -160,7 +167,6 @@ catch
     cruise = 'unknown';
 end
 
-
 %% get meta data from dat file
 % list of sequences: without "UsedForMerged"
 list_of_sequences = dir(fullfile(project_folder, 'raw', '20*'));
@@ -182,6 +188,11 @@ stop_time_list = zeros(1, seq_nb_max);
 profile_type_list = strings(1, seq_nb_max);
 sample_type_list = strings(1, seq_nb_max);
 integration_time_list = NaN(1, seq_nb_max);
+
+% Addition: cache per-sequence time & depth for ALR-driven matching later
+uvp_time_series  = cell(1, seq_nb_max);  % datenum time per UVP sequence
+uvp_depth_series = cell(1, seq_nb_max);  % depth per UVP sequence
+
 for seq_nb = 1:seq_nb_max
     % get hw conf data
     seq_dat_file = fullfile(list_of_sequences(seq_nb).folder, list_of_sequences(seq_nb).name, [list_of_sequences(seq_nb).name, '_data.txt']);
@@ -201,6 +212,10 @@ for seq_nb = 1:seq_nb_max
     I = isnan(black_nb(:,3));
     black_nb(I,:) = [];
     
+    % Addition: store per-sequence time & depth
+    uvp_time_series{seq_nb}  = time_data;
+    uvp_depth_series{seq_nb} = depth_data;
+
     % detection of ascent profile (or descent or parking)
     if strcmp(vector_type, 'float') && (abs(depth_data(end) - depth_data(1)) < parking_pressure_diff)
         profile_type = 'p';
@@ -246,26 +261,159 @@ for seq_nb = 1:seq_nb_max
         stop_time_list(seq_nb) = time_data(Zusable_idx(end));
     end
     
-    
     disp(['Sequence ' list_of_sequences(seq_nb).name ' done.'])
 end
 disp('---------------------------------------------------------------')
-
-
-
 
 %% get lat-lon from vector meta data
 % seaeplorer/seaglider dependant
 % go through meta files and look for start time of sequences
 % assume that sequences AND meta files are chronologicaly ordered
 disp('Process the vector meta data....')
+
 if strcmp(vector_type, 'float')
     ref_time_list = stop_time_list;
 else
     ref_time_list = start_time_list;
 end
-[lon_list, lat_list, yo_list, samples_names_list, vector_filenames_list] = GetMetaFromVectorMetaFile(vector_type, meta_data_folder, ref_time_list, list_of_sequences, profile_type_list, cruise);
+
+if ~strcmp(vector_type, 'ALR')
+    [lon_list, lat_list, yo_list, samples_names_list, vector_filenames_list] = ...
+        GetMetaFromVectorMetaFile(vector_type, meta_data_folder, ref_time_list, list_of_sequences, profile_type_list, cruise);
+else
+    % Addition: ALR-driven matching (±10s) against cached UVP times
+    [lon_list, lat_list, yo_list, samples_names_list, vector_filenames_list, ...
+     start_idx_list, end_idx_list, start_time_list, assigned_uvp_seq_idx, ...
+     alr_plot_time, alr_plot_depth, skipped_count, total_alr] = ...
+        GetMetaFromVectorMetaFile(vector_type, meta_data_folder, ref_time_list, ...
+                                  list_of_sequences, profile_type_list, cruise, ...
+                                  uvp_time_series, uvp_depth_series, start_idx_list, end_idx_list);
+    
+    % Addition: shrink all per-sequence UVP meta arrays to per-sample length by mapping
+    %           (reuse the per-UVP-sequence metadata for each ALR-derived sample)
+    aa_list        = aa_list(assigned_uvp_seq_idx);
+    exp_list       = exp_list(assigned_uvp_seq_idx);
+    volimage_list  = volimage_list(assigned_uvp_seq_idx);
+    pixelsize_list = pixelsize_list(assigned_uvp_seq_idx);
+    
+    % Addition: the 'filename' (UVP sequence folder) should follow the chosen UVP sequence per row
+    list_of_sequences = list_of_sequences(assigned_uvp_seq_idx);  % now length = #kept ALR samples
+    
+    % Addition: set profile/sample type = ALR suffix letter, and yo_list already set inside function
+    profile_type_list = strings(1, numel(samples_names_list));  % reset to per-sample sizing
+    sample_type_list  = strings(1, numel(samples_names_list));
+    for i = 1:numel(samples_names_list)
+        % parse suffix letter from ALR filename (stored in vector_filenames_list)
+        fname = char(vector_filenames_list(i));
+        tok = regexp(fname, '_([A-Za-z])\d+\.nc$', 'tokens', 'once');
+        if ~isempty(tok)
+            letter = tok{1};
+        else
+            letter = 'na';
+        end
+        profile_type_list(i) = string(letter);   % Addition
+        sample_type_list(i)  = string(letter);   % Addition
+    end
+    
+    % Addition: redefine seq_nb_max to the number of kept ALR samples
+    seq_nb_max = numel(samples_names_list);
+    
+    % Addition: after building everything, report skipped count
+    disp(['Matching UVP sequence times were not found for ' num2str(skipped_count) ...
+          ' of ' num2str(total_alr) ' samples.'])
+end
+
 disp('---------------------------------------------------------------')
+
+
+%% Addition: combined diagnostic plot (UVP vs ALR time–depth)
+
+try
+    % Get path of the currently open script (robust to Editor temp copies)
+    if ~isdeployed && usejava('desktop')
+        thisfile = matlab.desktop.editor.getActiveFilename;
+    else
+        thisfile = mfilename('fullpath');
+    end
+
+    if isempty(thisfile)
+        scriptDir = pwd;
+    else
+        scriptDir = fileparts(thisfile);
+    end
+
+    outdir = fullfile(scriptDir, 'output');
+    if ~exist(outdir, 'dir')
+        mkdir(outdir);
+    end
+    figure('Visible','off'); hold on; grid on;
+    % Plot all UVP sequences (thin line)
+    for s = 1:numel(uvp_time_series)
+        if isempty(uvp_time_series{s}) || isempty(uvp_depth_series{s}), continue; end
+        plot(uvp_time_series{s}, uvp_depth_series{s}, '-', 'LineWidth', 0.5); % UVP
+    end
+    % Overlay all kept ALR points
+    if exist('alr_plot_time','var') && ~isempty(alr_plot_time)
+        plot(alr_plot_time, alr_plot_depth, '.', 'MarkerSize', 6); % ALR
+    end
+    set(gca, 'YDir', 'reverse');
+    datetick('x','keeplimits');
+    xlabel('Time'); ylabel('Depth (m)');
+    legend({'UVP','ALR'}, 'Location','best');
+    title('UVP vs ALR time–depth (±10 s match window)');
+    print(fullfile(outdir, 'uvp_alr_timedepth.png'), '-dpng', '-r150');
+    close(gcf);
+    disp(['Saved diagnostic plot to: ' fullfile(outdir, 'uvp_alr_timedepth.png')])
+catch ME
+    disp(['Plotting skipped: ' ME.message])
+end
+
+
+%%
+
+N = numel(samples_names_list);      % number of ALR-matched samples
+seq_nb_max = N;                     % the writer loop will iterate N rows
+
+toRow = @(x) reshape(x, 1, []);     % helper to coerce to row vectors
+
+% Map per-UVP-sequence metadata to the chosen UVP sequence for each ALR row
+aa_list        = toRow(aa_list(assigned_uvp_seq_idx));
+exp_list       = toRow(exp_list(assigned_uvp_seq_idx));
+volimage_list  = toRow(volimage_list(assigned_uvp_seq_idx));
+pixelsize_list = toRow(pixelsize_list(assigned_uvp_seq_idx));
+
+% Integration time: reuse per-sequence values per matched ALR row, else NaN
+if exist('integration_time_list','var') && ~isempty(integration_time_list)
+    integration_time_list = toRow(integration_time_list(assigned_uvp_seq_idx));
+else
+    integration_time_list = NaN(1, N);
+end
+
+% These are already per-ALR row; just ensure 1×N shape
+lat_list              = toRow(lat_list);
+lon_list              = toRow(lon_list);
+yo_list               = toRow(yo_list);
+samples_names_list    = toRow(samples_names_list);      % string array OK
+vector_filenames_list = toRow(vector_filenames_list);   % string array OK
+start_idx_list        = toRow(start_idx_list);
+end_idx_list          = toRow(end_idx_list);
+start_time_list       = toRow(start_time_list);
+
+% Profile/sample type letters (from ALR suffix) should be per-ALR row
+profile_type_list = toRow(profile_type_list);
+sample_type_list  = toRow(sample_type_list);
+
+% UVP sequence struct array must be reindexed and shaped to 1×N
+list_of_sequences = list_of_sequences(:).';
+
+% (Optional) quick assert during development:
+% assert(all([N==numel(lat_list), N==numel(lon_list), N==numel(yo_list), ...
+%     N==numel(samples_names_list), N==numel(vector_filenames_list), ...
+%     N==numel(start_idx_list), N==numel(end_idx_list), N==numel(start_time_list), ...
+%     N==numel(aa_list), N==numel(exp_list), N==numel(volimage_list), ...
+%     N==numel(pixelsize_list), N==numel(profile_type_list), N==numel(sample_type_list), ...
+%     N==numel(integration_time_list)]), 'Array size mismatch after normalization.');
+% -------------------------------------------------------------------------
 
 
 %% sample file writing
@@ -327,13 +475,32 @@ for seq_nb = 1:seq_nb_max
     % ctd files names
     ctd_filesnames = [char(samples_names_list(seq_nb)) '.ctd'];
     % line to write
-    seq_line = [cruise ';' vector_sn ';' list_of_sequences(seq_nb).name ';' char(samples_names_list(seq_nb)) ';'...
-        'nan' ';' ctd_filesnames ';' num2str(lat_list(seq_nb)) ';' num2str(lon_list(seq_nb)) ';'...
-        num2str(start_idx_list(seq_nb)) ';' num2str(volimage_list(seq_nb)) ';' num2str(aa_list(seq_nb)) ';' num2str(exp_list(seq_nb)) ';'...
-        '' ';' 'nan' ';' 'nan' ';' 'nan' ';'...
-        'nan' ';' '' ';' num2str(end_idx_list(seq_nb)) ';' '' ';' ...
-        num2str(yo_list(seq_nb)) ';' char(sample_type_list(seq_nb)) ';' num2str(integration_time_list(seq_nb)) ';' char(vector_filenames_list(seq_nb)) ';'...
-        num2str(pixelsize_list(seq_nb)) ';' datestr(start_time_list(seq_nb), 'yyyymmdd-HHMMss')];
+    seq_line = [cruise ';'...
+                vector_sn ';'... 
+                list_of_sequences(seq_nb).name ';'...
+                char(samples_names_list(seq_nb)) ';'...
+                'nan' ';'...
+                ctd_filesnames ';'... 
+                num2str(lat_list(seq_nb)) ';'...
+                num2str(lon_list(seq_nb)) ';'...
+                num2str(start_idx_list(seq_nb)) ';'... 
+                num2str(volimage_list(seq_nb)) ';'... 
+                num2str(aa_list(seq_nb)) ';'... 
+                num2str(exp_list(seq_nb)) ';'...
+                '' ';'... 
+                'nan' ';'... 
+                'nan' ';'... 
+                'nan' ';'...
+                'nan' ';'... 
+                '' ';'... 
+                num2str(end_idx_list(seq_nb)) ';'...
+                '' ';'...
+                num2str(yo_list(seq_nb)) ';'...
+                char(sample_type_list(seq_nb)) ';'...
+                num2str(integration_time_list(seq_nb)) ';'...
+                char(vector_filenames_list(seq_nb)) ';'...
+                num2str(pixelsize_list(seq_nb)) ';'... 
+                datestr(start_time_list(seq_nb), 'yyyymmdd-HHMMss')];
     fprintf(sample_file, '%s\n', seq_line);
 end
 fclose(sample_file);

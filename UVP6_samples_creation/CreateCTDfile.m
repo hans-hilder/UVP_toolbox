@@ -31,9 +31,9 @@ elseif strcmp(vector_type, 'SeaExplorer')
     ctd_table = FillCTDtableSeaexplorer(ctd_table, data_table);
 elseif strcmp(vector_type, 'SeaGlider')
     ctd_table = FillCTDtableSeaglider(ctd_table, data_table);
+elseif strcmp(vector_type, 'ALR')
+    ctd_table = FillCTDtableALR(ctd_table, data_table);
 end
-    
-    
     
 %% write ctd file
 pathfilename = fullfile(project_folder, 'CTDdata', filename);

@@ -21,12 +21,12 @@ function [time_data, depth_data, raw_nb, black_nb, raw_grey, image_status] = Uvp
 %Initialisation of the variables updated for each line of the text
 %file / each image
 [n,m]=size(data_table);
-depth_data =     NaN*zeros(n,1);
-time_data =     NaN*zeros(n,1);
-black_nb =      NaN*zeros(n,900);
-raw_nb =        NaN*zeros(n,900);
-raw_grey =        NaN*zeros(n,900);
-image_status =  NaN*zeros(n,1);
+depth_data =   NaN*zeros(n,1);
+time_data =    NaN*zeros(n,1);
+black_nb =     NaN*zeros(n,900);
+raw_nb =       NaN*zeros(n,900);
+raw_grey =     NaN*zeros(n,900);
+image_status = NaN*zeros(n,1);
 
 % -------- Boucle sur les lignes (images) --------------
 % h is the number of the line
@@ -38,7 +38,7 @@ image_status =  NaN*zeros(n,1);
 
 for h=1:n
     if h/5000==floor(h/5000)
-        disp(num2str(h))
+        disp(num2str(h) + " of " + n)
     end
 
     % -------- VECTEURS METADATA -------
