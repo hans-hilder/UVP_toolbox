@@ -500,20 +500,6 @@ start_time_list       = toRow(start_time_list);
 profile_type_list = toRow(profile_type_list);
 sample_type_list  = toRow(sample_type_list);
 
-% For ALR: segments that are not 'u' (up) or 'd' (down) are not vertical
-% profiles and must use TIME integration, not DEPTH.
-if strcmp(vector_type, 'ALR')
-    for i = 1:N
-        letter = char(profile_type_list(i));
-        if ~strcmp(letter, 'u') && ~strcmp(letter, 'd')
-            sample_type_list(i)      = "T";
-            integration_time_list(i) = 1;
-        else
-            sample_type_list(i) = "P";
-        end
-    end
-end
-
 % UVP sequence struct array must be reindexed and shaped to 1xN
 list_of_sequences = list_of_sequences(:).';
 
@@ -525,6 +511,24 @@ list_of_sequences = list_of_sequences(:).';
 %     N==numel(pixelsize_list), N==numel(profile_type_list), N==numel(sample_type_list), ...
 %     N==numel(integration_time_list)]), 'Array size mismatch after normalization.');
 % -------------------------------------------------------------------------
+
+% For ALR: only 'u' (up) and 'd' (down) segments traverse a water column
+% and should use DEPTH integration ('P'). Any other suffix letter (e.g. 'h'
+% for horizontal transit, 's' for station-keeping, etc.) has no meaningful
+% depth axis and must be treated as TIME integration ('T'), consistent with
+% how float parking sequences are handled above.
+if strcmp(vector_type, 'ALR')
+    for i = 1:N
+        letter = char(profile_type_list(i));
+        if strcmp(letter, 'u') || strcmp(letter, 'd')
+            sample_type_list(i) = "P";
+            % integration_time_list stays NaN for depth-integrated profiles
+        else
+            sample_type_list(i)      = "T";
+            integration_time_list(i) = 1;
+        end
+    end
+end
 
 
 %% sample file writing
