@@ -173,6 +173,11 @@ for meta_nb = 1:length(list_of_vector_meta)
             
                 % Walk every ALR file and pick the UVP sequence with the largest overlap
                 for k = 1:total_alr
+                    % small verbose line every 10 files
+                    if mod(k,10) == 0
+                        fprintf('Processing ALR file %d/%d: %s\n', k, total_alr, list_of_vector_meta(k).name);
+                    end
+
                     nc_path = fullfile(meta_folder_alr, list_of_vector_meta(k).name);
                     [meta, data] = ReadMetaALR(nc_path);
                     t_alr = meta(:,1);
@@ -208,13 +213,20 @@ for meta_nb = 1:length(list_of_vector_meta)
                     eidx  = best_idx(end) - 1;
                     stime = uvp_time_series{best_seq}(best_idx(1));
             
-                    % Lat/Lon as median over file, or as first value in
-                    % file
+                    % Lat/Lon as first non-NaN values in file
                     lat_vals = meta(:,3); lon_vals = meta(:,4);
-                    %lat_keep = median(lat_vals(~isnan(lat_vals)));
-                    lat_keep = lat_vals(1);
-                    %lon_keep = median(lon_vals(~isnan(lon_vals)));
-                    lon_keep = lon_vals(1);
+                    i_lat = find(~isnan(lat_vals), 1, 'first');
+                    i_lon = find(~isnan(lon_vals), 1, 'first');
+                    if isempty(i_lat)
+                        lat_keep = NaN;
+                    else
+                        lat_keep = lat_vals(i_lat);
+                    end
+                    if isempty(i_lon)
+                        lon_keep = NaN;
+                    else
+                        lon_keep = lon_vals(i_lon);
+                    end
             
                     % Names/IDs from ALR filename
                     fname = list_of_vector_meta(k).name;

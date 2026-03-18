@@ -3,19 +3,8 @@
 xx_alr_time_remap = alr_plot_time;
 xx_alr_depth_remap = alr_plot_depth;
 
-xx_uvp_time_remap = uvp_time_series{:};
-xx_uvp_depth_remap = uvp_depth_series{:};
-
-%%
-figure('Color','w');
-hold on
-scatter(xx_alr_time_remap,xx_alr_depth_remap)
-scatter(xx_uvp_time_remap,xx_uvp_depth_remap)
-legend({'alr','uvp'})
-set(gca,'YDir','reverse');
-xlabel('Time');
-ylabel('Depth (m)');
-title('Raw ALR & UVP depth');
+xx_uvp_time_remap = vertcat(uvp_time_series{:});
+xx_uvp_depth_remap = vertcat(uvp_depth_series{:});
 
 %% SIMPLE TURNING-POINT ALIGNMENT BETWEEN ALR & UVP
 %  1) Convert ALR & UVP times to seconds and take overlapping window.
@@ -27,7 +16,7 @@ title('Raw ALR & UVP depth');
 %     sign changes within a +/- velChangeSearchWindow_s window and
 %     overlay those offsets on the histogram.
 %
-% Assumed inputs in workspace:
+% Assumed inputs in workspace
 %   alr_plot_time      : ALR time vector (datenum, datetime, or seconds)
 %   alr_plot_depth     : ALR depth vector (m, positive downward)
 %   uvp_time_series    : cell containing UVP time vector
@@ -42,8 +31,8 @@ title('Raw ALR & UVP depth');
 xx_alr_time_remap   = alr_plot_time;
 xx_alr_depth_remap  = alr_plot_depth;
 
-xx_uvp_time_remap   = uvp_time_series{:};
-xx_uvp_depth_remap  = uvp_depth_series{:};
+xx_uvp_time_remap   = vertcat(uvp_time_series{:});
+xx_uvp_depth_remap  = vertcat(uvp_depth_series{:});
 
 figure('Color','w');
 hold on
@@ -62,9 +51,9 @@ title('Raw ALR & UVP depth');
 alrTimeRaw_something    = alr_plot_time(:);
 alrDepthRaw_m           = alr_plot_depth(:);
 
-uvpTimeRaw_something    = uvp_time_series{:};
+uvpTimeRaw_something    = vertcat(uvp_time_series{:});
 uvpTimeRaw_something    = uvpTimeRaw_something(:);
-uvpDepthRaw_m           = uvp_depth_series{:};
+uvpDepthRaw_m           = vertcat(uvp_depth_series{:});
 uvpDepthRaw_m           = uvpDepthRaw_m(:);
 
 %% ------------------------------------------------------------------------
@@ -80,18 +69,17 @@ minSegmentDepthChange_m     = 10.0;    % min depth change between successive tur
 
 depthSmoothingWindow_s      = 20.0;    % total smoothing window on depth (s)
 
-% NEW: zoom window in seconds (instead of number of points)
-zoomHalfWindow_s            = 30;      % plot +/- 30 s around ALR turning point
+% Zoom window in seconds (now centered on UVP turning point; UVP = reference)
+zoomHalfWindow_s            = 30;      % plot +/- 30 s around UVP turning point
 
 largeOffsetThreshold_s      = 1;       % only zoom pairs with Δt > this (s)
 
 velChangeSearchWindow_s     = 60.0;    % +/- window for velocity sign-change search (s)
 
-% NEW: flag to include/exclude positive Δt in histograms/stats
-% true  = use only Δt <= 0 (UVP not later than ALR)
+% We now define Δt = t_ALR - t_UVP (UVP is the reference)
+% true  = use only Δt <= 0 (ALR not later than UVP)
 % false = use all matched pairs
-restrictToNonPositive       = false;
-
+restrictToNonNegative       = true;
 
 %% ------------------------------------------------------------------------
 % 2) CONVERT TIME TO SECONDS AND FIND OVERLAP
@@ -221,7 +209,7 @@ legend({'raw depth','smoothed depth','turning point'},'Location','best');
 grid on;
 
 %% ------------------------------------------------------------------------
-% 5) MATCH TURNING POINTS AND HISTOGRAM (DEPTH-BASED PRODUCT)
+% 5) MATCH TURNING POINTS AND HISTOGRAM (ALR RELATIVE TO UVP)
 % -------------------------------------------------------------------------
 
 [matchedAlrIdx, matchedUvpIdx, timeDifference_s] = ...
@@ -230,12 +218,12 @@ grid on;
                                maxPairOffset_s);
 
 fprintf('\nMatched %d turning-point pairs (all signs).\n', numel(timeDifference_s));
-fprintf('All pairs: mean dt (UVP - ALR)    = %.3f s\n', mean(timeDifference_s));
+fprintf('All pairs: mean dt (ALR - UVP)    = %.3f s\n', mean(timeDifference_s));
 fprintf('All pairs: median dt              = %.3f s\n', median(timeDifference_s));
 
 % Decide which pairs to use based on restrictToNonPositive
-if restrictToNonPositive
-    useMask   = timeDifference_s <= 0;
+if restrictToNonNegative
+    useMask   = timeDifference_s >= 0;  % ALR not earlier than UVP
     maskLabel = 'dt <= 0';
     figName   = 'Histogram of turning-point time differences (dt <= 0)';
 else
@@ -253,9 +241,9 @@ figure('Name', figName, 'Color','w');
 histogram(timeDifference_used_s, 'BinWidth', 1, ...
           'DisplayName', sprintf('Depth turning points (%s)', maskLabel));
 hold on;
-xlabel('dt = t_{UVP} - t_{ALR} (s)');
+xlabel('dt = t_{ALR} - t_{UVP} (s)');
 ylabel('Count');
-title(['Time differences between matched turning points (', maskLabel, ')']);
+title(['Time differences (ALR relative to UVP, ', maskLabel, ')']);
 grid on;
 
 meanUsed_s   = mean(timeDifference_used_s);
@@ -316,7 +304,9 @@ validVelPairs = ~isnan(tAlr_vel_s) & ~isnan(tUvp_vel_s);
 
 % Use the SAME subset as depth hist (useMask) plus valid velocities
 velMask              = validVelPairs & useMask;
-timeDifference_vel_s = tUvp_vel_s(velMask) - tAlr_vel_s(velMask);
+
+% Flipped definition: dt_vel = t_ALR(vel) - t_UVP(vel)
+timeDifference_vel_s = tAlr_vel_s(velMask) - tUvp_vel_s(velMask);
 
 fprintf('Velocity-based refinement (%s): available for %d/%d pairs.\n', ...
         maskLabel, numel(timeDifference_vel_s), numel(timeDifference_s));
@@ -340,6 +330,7 @@ end
 % -------------------------------------------------------------------------
 
 % Only look at matching points that have a positive delta above threshold
+% (With dt = t_ALR - t_UVP, positive means ALR is later than UVP)
 largeOffsetMask  = (timeDifference_s > largeOffsetThreshold_s);  % positive AND > threshold
 largeOffsetPairs = find(largeOffsetMask);
 
@@ -358,10 +349,10 @@ for n = 1:numel(largeOffsetPairs)
     alrStartIdx = alrTurningIdx(matchedAlrIdx(pairIdx));
     uvpStartIdx = uvpTurningIdx(matchedUvpIdx(pairIdx));
 
-    % Reference time = ALR turning time
-    t0 = alrTimeWindow_s(alrStartIdx);
+    % Reference time = UVP turning time (reference series)
+    t0 = uvpTimeWindow_s(uvpStartIdx);
 
-    % Time-based windows: +/- zoomHalfWindow_s for BOTH ALR and UVP
+    % Time-based windows: +/- zoomHalfWindow_s around UVP reference time
     alrIdxWindow = find( ...
         alrTimeWindow_s >= (t0 - zoomHalfWindow_s) & ...
         alrTimeWindow_s <= (t0 + zoomHalfWindow_s));
@@ -377,7 +368,7 @@ for n = 1:numel(largeOffsetPairs)
         continue;
     end
 
-    % Time relative to ALR turning point
+    % Time relative to UVP turning point (reference = 0)
     alrTimeRel_s = alrTimeWindow_s(alrIdxWindow) - t0;
     uvpTimeRel_s = uvpTimeWindow_s(uvpIdxWindow) - t0;
 
@@ -385,25 +376,25 @@ for n = 1:numel(largeOffsetPairs)
     alrDepthSlice_m = alrDepthWindow_m(alrIdxWindow);
     uvpDepthSlice_m = uvpDepthWindow_m(uvpIdxWindow);
 
-    % This pair's offset (UVP - ALR) -- guaranteed positive and > threshold
+    % This pair's offset (ALR - UVP) -- guaranteed positive and > threshold
     dt_pair_s = timeDifference_s(pairIdx);
 
     figure('Name', sprintf('Matched pair %d (\\Delta t = %.2f s)', ...
                            pairIdx, dt_pair_s), ...
            'Color','w');
 
-    plot(alrTimeRel_s, alrDepthSlice_m, 'k.-', 'DisplayName','ALR'); hold on;
-    plot(uvpTimeRel_s, uvpDepthSlice_m, 'b.-', 'DisplayName','UVP');
+    plot(uvpTimeRel_s, uvpDepthSlice_m, 'b.-', 'DisplayName','UVP'); hold on;
+    plot(alrTimeRel_s, alrDepthSlice_m, 'k.-', 'DisplayName','ALR');
 
-    xline(0,        'r--', 'ALR turning', ...
+    xline(0,        'r--', 'UVP turning', ...
           'LabelVerticalAlignment','bottom', ...
           'LabelHorizontalAlignment','left');
-    xline(dt_pair_s,'m--', 'UVP turning', ...
+    xline(dt_pair_s,'m--', 'ALR turning', ...
           'LabelVerticalAlignment','bottom', ...
           'LabelHorizontalAlignment','right');
 
     set(gca,'YDir','reverse');
-    xlabel('Time relative to ALR turning (s)');
+    xlabel('Time relative to UVP turning (s)');
     ylabel('Depth (m)');
     title(sprintf(['Zoomed depth around matched turning points ', ...
                    '(pair %d, \\Delta t = %.2f s, window \\pm %.1f s)'], ...
@@ -411,6 +402,51 @@ for n = 1:numel(largeOffsetPairs)
     legend('Location','best');
     grid on;
 end
+
+%% ------------------------------------------------------------------------
+% 7) DRIFT OVER TIME: UNBINNED Δt VS DATETIME (UVP-REFERENCED)
+% -------------------------------------------------------------------------
+% Plot raw time differences (Δt = t_ALR - t_UVP) versus the UVP turning
+% times to inspect whether drift changes over time.
+
+if ~isempty(timeDifference_used_s)
+    % --- Get the UVP times corresponding to the USED pairs (reference)
+    uvpTimes_all_s  = uvpTurningTimes_s(matchedUvpIdx);   % seconds since common origin
+    uvpTimes_used_s = uvpTimes_all_s(useMask);
+
+    % --- Convert to datetime if possible; otherwise use duration since first UVP time
+    if exist('commonTimeOrigin','var')
+        if isdatetime(commonTimeOrigin)
+            xTimes = commonTimeOrigin + seconds(uvpTimes_used_s);
+            xLabelStr = 'Datetime';
+        elseif isnumeric(commonTimeOrigin) % datenum origin
+            xTimes = datetime(commonTimeOrigin + uvpTimes_used_s/86400, 'ConvertFrom','datenum');
+            xLabelStr = 'Datetime';
+        else
+            xTimes = seconds(uvpTimes_used_s - uvpTimes_used_s(1));
+            xLabelStr = 'Time since first UVP turning (s)';
+        end
+    else
+        xTimes = seconds(uvpTimes_used_s - uvpTimes_used_s(1));
+        xLabelStr = 'Time since first UVP turning (s)';
+    end
+
+    % --- Plot: unbinned Δt vs time
+    figure('Name','7) Drift over time: unbinned \Delta t vs time','Color','w');
+    scatter(xTimes, timeDifference_used_s, 25, 'filled', ...
+            'MarkerFaceColor', [0.2 0.2 0.8], ...
+            'MarkerEdgeColor', 'none');
+    hold on;
+    yline(0, '--', 'Zero drift', 'HandleVisibility','off');
+    grid on;
+
+    xlabel(xLabelStr);
+    ylabel('\Delta t = t_{ALR} - t_{UVP} (s)');
+    title('Time offset (\Delta t) vs time (UVP as reference)');
+else
+    warning('Section 7: No data in selected subset to plot drift.');
+end
+
 
 %% ========================================================================
 % LOCAL FUNCTIONS
@@ -421,6 +457,7 @@ function [matchedAlrIndices, matchedUvpIndices, timeDifference_s] = ...
 %MATCHINFLECTIONTIMESGREEDY
 %   One-to-one nearest-neighbour matcher in time.
 %
+%   We now report Δt = t_ALR - t_UVP (UVP is the reference).
 %   For each ALR inflection time, find the UVP inflection time that:
 %     - is not already matched
 %     - lies within ±maxPairOffset_s
@@ -445,7 +482,7 @@ function [matchedAlrIndices, matchedUvpIndices, timeDifference_s] = ...
     for idxAlr = 1:numAlr
 
         currentAlrTime = alrInflectionTimes_s(idxAlr);
-        deltaTimes_s   = uvpInflectionTimes_s - currentAlrTime;
+        deltaTimes_s   = uvpInflectionTimes_s - currentAlrTime;  % UVP - ALR
 
         candidateMask = (~uvpAlreadyMatched) & (abs(deltaTimes_s) <= maxPairOffset_s);
 
@@ -456,12 +493,14 @@ function [matchedAlrIndices, matchedUvpIndices, timeDifference_s] = ...
         candidateIdx      = find(candidateMask);
         [~, localBestIdx] = min(abs(deltaTimes_s(candidateMask)));
         bestUvpIdx        = candidateIdx(localBestIdx);
-        bestDeltaTime_s   = deltaTimes_s(bestUvpIdx);
+        bestDeltaTime_s   = deltaTimes_s(bestUvpIdx);            % UVP - ALR
 
         matchCounter = matchCounter + 1;
         matchedAlrIndices(matchCounter) = idxAlr;
         matchedUvpIndices(matchCounter) = bestUvpIdx;
-        timeDifference_s(matchCounter)  = bestDeltaTime_s;
+
+        % Report dt = t_ALR - t_UVP (flip sign of UVP - ALR)
+        timeDifference_s(matchCounter)  = -bestDeltaTime_s;
 
         uvpAlreadyMatched(bestUvpIdx) = true;
     end

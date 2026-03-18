@@ -500,6 +500,20 @@ start_time_list       = toRow(start_time_list);
 profile_type_list = toRow(profile_type_list);
 sample_type_list  = toRow(sample_type_list);
 
+% For ALR: segments that are not 'u' (up) or 'd' (down) are not vertical
+% profiles and must use TIME integration, not DEPTH.
+if strcmp(vector_type, 'ALR')
+    for i = 1:N
+        letter = char(profile_type_list(i));
+        if ~strcmp(letter, 'u') && ~strcmp(letter, 'd')
+            sample_type_list(i)      = "T";
+            integration_time_list(i) = 1;
+        else
+            sample_type_list(i) = "P";
+        end
+    end
+end
+
 % UVP sequence struct array must be reindexed and shaped to 1xN
 list_of_sequences = list_of_sequences(:).';
 
@@ -517,7 +531,9 @@ list_of_sequences = list_of_sequences(:).';
 disp('Creating the sample file...')
 % file creation
 
+% Specific edits for alr project
 cruise = 'DY180';
+yo_list_2 = compose('segment_%d', yo_list);
 
 sample_file = fopen(sample_filename,'w','n','windows-1252');
     
@@ -594,7 +610,7 @@ for seq_nb = 1:seq_nb_max
                 '' ';'... 
                 num2str(end_idx_list(seq_nb)) ';'...
                 '' ';'...
-                num2str(yo_list(seq_nb)) ';'...
+                yo_list_2{seq_nb} ';'...
                 char(sample_type_list(seq_nb)) ';'...
                 num2str(integration_time_list(seq_nb)) ';'...
                 char(vector_filenames_list(seq_nb)) ';'...
